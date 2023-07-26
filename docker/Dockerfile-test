@@ -1,0 +1,12 @@
+FROM elixir:1.15.4
+
+WORKDIR /app
+
+RUN mix local.hex --force && \
+    mix local.rebar --force
+
+COPY .. .
+
+RUN ls .
+
+CMD ["mix", "test"]
