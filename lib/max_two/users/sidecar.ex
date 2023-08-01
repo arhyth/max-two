@@ -1,9 +1,21 @@
-defmodule MaxTwo.Sidecar do
+defmodule MaxTwo.Users.Sidecar do
   @moduledoc """
-  Implements a sidecar genserver for the MaxTwo User repository,
+  Defines behaviour for Users sidecar/agent
+  """
+
+  @doc """
+  Retrieves at most 2 users and NaiveDateTime of last query served
+  """
+  @callback get_users() :: {list(struct()), struct()}
+end
+
+defmodule MaxTwo.Users.GenSidecar do
+  @moduledoc """
+  Implements a sidecar genserver for the MaxTwo Users service,
   periodically updating users' points with randomly generated numbers and
   keeping pertinent state (eg. current minimum number, time of last query).
   """
+  @behaviour MaxTwo.Users.Sidecar
 
   use GenServer
   require Logger
@@ -14,18 +26,22 @@ defmodule MaxTwo.Sidecar do
   @min_cooldown_ms 10_000
 
   @impl GenServer
-  def init(_opts) do
+  def init(opts) do
     rnd = MaxTwo.Utils.rand_less_one()
     conf = Application.get_env(:max_two, MaxTwo)
+    users_service = Keyword.get(opts, :users_service, MaxTwo.Users)
+    update_fun = Keyword.get(opts, :update_fun, :update_users_points)
+    update_args = Keyword.get(opts, :update_args, [@trigger_interval, @page_limit])
 
     state = %{
       min: rnd,
       query_ts: nil,
       update_ts: nil,
       config: %{
+        users_service: users_service,
+        update_fun: update_fun,
+        update_args: update_args,
         update_interval: Keyword.get(conf, :update_interval_ms, @update_interval_ms),
-        page_limit: Keyword.get(conf, :page_limit, @page_limit),
-        trigger_interval: Keyword.get(conf, :trigger_interval, @trigger_interval),
         min_cooldown: Keyword.get(conf, :min_cooldown_ms, @min_cooldown_ms)
       }
     }
@@ -47,7 +63,12 @@ defmodule MaxTwo.Sidecar do
   # callback for starting an update process
   @impl GenServer
   def handle_info({:update, new_min}, %{config: cfg} = state) do
-    Process.spawn(fn -> update_users_stream(cfg.trigger_interval, cfg.page_limit) end, [:monitor])
+    Process.spawn(
+      cfg.users_service,
+      cfg.update_fun,
+      cfg.update_args,
+      [:monitor]
+    )
     {:noreply, %{state | min: new_min, update_ts: NaiveDateTime.utc_now()}}
   end
 
@@ -60,7 +81,7 @@ defmodule MaxTwo.Sidecar do
     msg = {:update, MaxTwo.Utils.rand_less_one()}
 
     # send message to trigger next update round; cooldown if DB is overloaded
-    after_t = next(cfg.update_interval, elapsed, cfg.min_cooldown)
+    after_t = tick(cfg.update_interval, elapsed, cfg.min_cooldown)
     Process.send_after(__MODULE__, msg, after_t)
 
     Logger.info(%{
@@ -89,61 +110,19 @@ defmodule MaxTwo.Sidecar do
 
   # callback for serving context request get_users with timestamp for last served query
   @impl GenServer
-  def handle_call(:get, _from, %{min: min, update_ts: ts} = state) do
+  def handle_call(:get, _from, %{min: min, query_ts: ts, config: cfg} = state) do
     {
       :reply,
-      {MaxTwo.Users.get_users(min), ts},
-      %{state | min: min, update_ts: NaiveDateTime.utc_now()}
+      {cfg.users_service.get_with_min_points(min), ts},
+      %{state | min: min, query_ts: NaiveDateTime.utc_now()}
     }
   end
 
-  # update all users' `points` field via streaming; this is a non-transactional operation
-  def update_users_stream(trigger_interval, page_size) do
-    stream =
-      Stream.resource(
-        fn -> {:start, page_size} end,
-        fn
-          {:start, page_size} ->
-            MaxTwo.Users.cursor_paginate([id: :asc], page_size)
-          %{after: cur, page_size: ps} when not is_nil(cur) ->
-            MaxTwo.Users.cursor_paginate([id: :asc], ps, [after: cur])
-          %{after: nil} ->
-            {:halt, nil}
-        end,
-        fn _ -> nil end
-      )
+  @impl MaxTwo.Users.Sidecar
+  def get_users(), do: GenServer.call(__MODULE__, :get)
 
-    window = Flow.Window.trigger_every(Flow.Window.global(), trigger_interval)
-
-    stream
-    |> Stream.map(fn u -> {u.id, MaxTwo.Utils.rand_less_one()} end)
-    |> Flow.from_enumerable()
-    # partition updates via their random number so they can be batched
-    |> Flow.partition(key: {:elem, 1}, window: window, stages: 20)
-    # since partitions cannot be pinned to stages 1to1,
-    # a map accumulator is used with random numbers as keys
-    # and list of ids as corresponding values
-    |> Flow.reduce(
-      fn -> %{} end,
-      fn {uid, randn}, all_ids ->
-        Map.update(all_ids, randn, [], fn ids -> [uid | ids] end)
-      end
-    )
-    # run actual repo update on trigger using the accumulated ids
-    |> Flow.on_trigger(fn acc ->
-      Enum.each(acc, fn {rand, ids} ->
-        MaxTwo.Users.set_points(ids, rand)
-      end)
-
-      # this is only a placeholder to satisfy `on_trigger` signature
-      # instead of passing around heavy data we no longer care about
-      {[1], %{}}
-    end)
-    |> Flow.run()
-  end
-
-  # determine next call while respecting cooldown
-  defp next_call(target_interval, elapsed, min_cooldown) do
+  # determine next tick on target interval while respecting cooldown
+  defp tick(target_interval, elapsed, min_cooldown) do
     cond do
       elapsed >= target_interval ->
         min_cooldown

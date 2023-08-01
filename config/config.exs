@@ -8,7 +8,12 @@
 import Config
 
 config :max_two,
-  ecto_repos: [MaxTwo.Repo]
+  environment: config_env(),
+  ecto_repos: [MaxTwo.Repo],
+  # Set users service behaviour implementation
+  users_service: MaxTwo.Users,
+  # Set users sidecar implementation
+  users_sidecar: MaxTwo.Users.GenSidecar
 
 config :max_two, MaxTwo.Repo,
   pool_size: 20
@@ -30,7 +35,6 @@ config :logger, :console,
 
 # MaxTwo context/service and sidecar config
 config :max_two, MaxTwo,
-  environment: config_env(),
   # interval between update starts, in milliseconds
   update_interval_ms: 60_000,
   # number of rows fetched from DB on each query

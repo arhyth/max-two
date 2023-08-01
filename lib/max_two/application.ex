@@ -19,8 +19,8 @@ defmodule MaxTwo.Application do
       # Start a worker by calling: MaxTwo.Worker.start_link(arg)
       # {MaxTwo.Worker, arg}
     ]
-    env = Application.get_env(:max_two, MaxTwo)[:environment]
-    children = if env == :test, do: common, else: common ++ [{MaxTwo.Sidecar, []}]
+    env = Application.get_env(:max_two, :environment)
+    children = if env == :test, do: common, else: common ++ [{MaxTwo.Users.GenSidecar, []}]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

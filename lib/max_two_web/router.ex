@@ -28,7 +28,7 @@ defmodule MaxTwoWeb.Router do
   # This is more in the spirit of Erlang's "let it crash" philosophy.
   @impl Plug.ErrorHandler
   def handle_errors(conn, %{
-        reason: {:timeout, {GenServer, :call, [MaxTwo.Sidecar, :get, _timeout]}}
+        reason: {:timeout, {GenServer, :call, [MaxTwo.Users.GenSidecar, :get, _timeout]}}
       }) do
     conn
     |> put_resp_content_type("application/json")

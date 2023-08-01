@@ -9,9 +9,17 @@ config :max_two, MaxTwo.Repo,
   username: "maxtwo",
   password: "passwswsw",
   hostname: "localhost",
+  post: 5432,
   database: "max_two_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: 10
+
+config :max_two,
+  environment: config_env(),
+  # Set users service behaviour implementation
+  users_service: MaxTwo.UsersServiceMock,
+  # Set users sidecar implementation
+  users_sidecar: MaxTwo.Users.SidecarMock
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
