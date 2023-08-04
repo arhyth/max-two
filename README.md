@@ -3,6 +3,11 @@ Max Two
 
 A service that returns at most 2 users based on a random minimum number you cannot see :ghost:.
 
+### Original requirements
+1. seed 1M users with field `points: 0` into the repository
+2. service should update 1M users, each with a random `points` value, every 1 minute
+3. service should expose an endpoint that returns at most 2 users based on another random minimum number that is also updated every 1 minute
+
 ## Development
 
 ### Dependencies
@@ -85,14 +90,12 @@ curl localhost:4000/
 
 ### Notes / FAQ
 
-1. Great stuff! This was a deceptively difficult task. At first, I thought to myself this should be easy, just front a genserver to a repo. But updating 1M rows in <60s that really took the difficulty level up some notches. I also forgot a lot of OTP things as I haven't written Elixir code for more than a year now. It's quite a challenging refresher. I really enjoyed it.
+:pen: This repo / coding exercise was part of the application process to one of a few well-known "Elixir shop" companies in the world. The following points are notes I made as I was implementing the excercise. I'm putting this out into the public only to demonstrate my Elixir coding skills. Any style or structure apparent here is only to fulfill the absolute necessity. The only coding style I personally adhere to is "as minimal structure and/or abstraction as necessary", everything else is fluid.
 
-2. Why are there no tests? Because nondeterministic behavior and genservers; that is, nondeterminism not only due to the random numbers requirement but also due to the timing of effects (updates happening piecemeal over time rather than in one transactional go) as an effect of the scale (eg. 1m rows in <1min) requirement. I thought about parameterizing the "update function" that's passed to the spawn process, to be able to write some tests. But it seems superficial, and at that point you ask yourself as I did, is the thing I'm testing still the same thing I'm running?
+1. ~~Why are there no tests?~~ There are unit tests but none that covers the system as a whole because nondeterministic behavior and genservers. That is, nondeterminism not only due to the random numbers requirement but also due to the timing of effects (updates happening piecemeal over time rather than in one transactional go) as an effect of the scale (eg. 1m rows in <1min) requirement. ~~I thought about parameterizing the "update function" that's passed to the spawn process, to be able to write some tests. But it seems superficial, and at that point you ask yourself as I did,~~ is the thing I'm testing still the same thing I'm running? I ended up testing pieces of the logic in isolation. So, still not the same thing but close enough, I guess.
 
-3. The repo could not be cloned to test if the environment setup was actually reproducible (without Docker which I personally don't use locally aside from running the dev DB). When I tried to clone it, I only got the README.
+2. Why do updates not run exactly every minute? *It actually does, most of the time.* In a more realistic production app/service when your resources are at their limit, you want to let them breathe a bit. Otherwise, you run the risk of spiralling down to catastrophic failure. But since this is also an imaginary app/service, I could just assume that the update interval of 1min is a technical requirement and can be relaxed rather than a business critical requirement. Hence, I added a cooldown logic in case the update task exceeds the 1min interval.
 
-5. Why do updates not run exactly every minute? Because in a more realistic production app/service, you want your resources to be able to breathe when they're at their limit. Otherwise you run the risk of spiralling down to catastrophic failure. But since this is also an imaginary app/service, I could just assume that the update interval of 1min is a technical requirement and can be relaxed rather than a business critical requirement.
+3. Why not persist the last query timestamp to the DB so that it survives server restart? I could but it's not a specified behavior. Also, it's a "commutative" change (eg. I can add it now and send my solution a bit later or I can add it "later" and send my solution a little earlier. Any way works. The choice would not impact the design of the service except that I'm optimizing for delivery time and so, no persistence.)
 
-6. Why not persist the last query timestamp to the DB so that it survives server restart? I could but it's not a specified behavior. Also, it's a "commutative" change (eg. I can add it now and send my solution a bit later or I can add it "later" and send my solution a little earlier. Any way works. The choice would not impact the design of the service except that I'm optimizing for delivery time and so, no persistence.)
-
-7. Why use an unlinked process for the update task? Linking does not provide any benefit here because the task is going to be restarted anyway without supervision tree goodies. Also, even if it was a one-off task that should only be restarted on failure, some sophisticated (complicated?) logic for "checking out" intermediate state and progress would have to be added to be able to restart/respawn at failure point. 
+4. Why use an unlinked process for the update task? Linking does not provide any benefit here because the task is going to be restarted anyway without supervision tree goodies. Also, even if it was a one-off task that should only be restarted on failure, some sophisticated (complicated?) logic for "checking in/out" intermediate state and progress would have to be added to be able to restart/respawn at failure point. 
